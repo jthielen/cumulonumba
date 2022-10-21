@@ -1,0 +1,30 @@
+~*
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+*.pyc
+*.so
+*.c
+
+.coverage
+.coverage.*
+.cache
+.pytest_cache
+pip-wheel-metadata/
+
+.ipynb_checkpoints/
+
+dist/*
+build/*
+*.egg-info
+MANIFEST
+.eggs/
+
+# Ignore intermediate results from full_application
+examples/full_application/batches/
+examples/full_application/output/
+
+# Ignore experimentation directory
+exper/
