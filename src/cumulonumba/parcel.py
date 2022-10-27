@@ -446,19 +446,19 @@ def parcel_profile(pressure, temperature, dewpoint):
 
     Parameters
     ----------
-    pressure : `pint.Quantity`
+    pressure : 1D array-like
         Atmospheric pressure level(s) of interest. This array must be from
         high to low pressure.
 
-    temperature : `pint.Quantity`
+    temperature : 1D array-like
         Starting temperature
 
-    dewpoint : `pint.Quantity`
+    dewpoint : 1D array-like
         Starting dewpoint
 
     Returns
     -------
-    `pint.Quantity`
+    1D array-like
         The parcel's temperatures at the specified pressure levels
 
     """
@@ -466,51 +466,52 @@ def parcel_profile(pressure, temperature, dewpoint):
     return np.concatenate((t_l, t_u))
 
 
-# def parcel_profile_with_lcl(pressure, temperature, dewpoint):
-#     r"""Calculate the profile a parcel takes through the atmosphere.
+@numba.njit
+def parcel_profile_with_lcl(pressure, temperature, dewpoint):
+    r"""Calculate the profile a parcel takes through the atmosphere.
 
-#     The parcel starts at `temperature`, and `dewpoint`, lifted up
-#     dry adiabatically to the LCL, and then moist adiabatically from there.
-#     `pressure` specifies the pressure levels for the profile. This function returns
-#     a profile that includes the LCL.
+    The parcel starts at `temperature`, and `dewpoint`, lifted up
+    dry adiabatically to the LCL, and then moist adiabatically from there.
+    `pressure` specifies the pressure levels for the profile. This function returns
+    a profile that includes the LCL.
 
-#     Parameters
-#     ----------
-#     pressure : `pint.Quantity`
-#         Atmospheric pressure level(s) of interest. This array must be from
-#         high to low pressure.
+    Parameters
+    ----------
+    pressure : 1D array-like
+        Atmospheric pressure level(s) of interest. This array must be from
+        high to low pressure.
 
-#     temperature : `pint.Quantity`
-#         Atmospheric temperature at the levels in `pressure`. The first entry should be at
-#         the same level as the first `pressure` data point.
+    temperature : 1D array-like
+        Atmospheric temperature at the levels in `pressure`. The first entry should be at
+        the same level as the first `pressure` data point.
 
-#     dewpoint : `pint.Quantity`
-#         Atmospheric dewpoint at the levels in `pressure`. The first entry should be at
-#         the same level as the first `pressure` data point.
+    dewpoint : 1D array-like
+        Atmospheric dewpoint at the levels in `pressure`. The first entry should be at
+        the same level as the first `pressure` data point.
 
-#     Returns
-#     -------
-#     pressure : `pint.Quantity`
-#         The parcel profile pressures, which includes the specified levels and the LCL
+    Returns
+    -------
+    pressure : 1D array-like
+        The parcel profile pressures, which includes the specified levels and the LCL
 
-#     ambient_temperature : `pint.Quantity`
-#         Atmospheric temperature values, including the value interpolated to the LCL level
+    ambient_temperature : 1D array-like
+        Atmospheric temperature values, including the value interpolated to the LCL level
 
-#     ambient_dew_point : `pint.Quantity`
-#         Atmospheric dewpoint values, including the value interpolated to the LCL level
+    ambient_dew_point : 1D array-like
+        Atmospheric dewpoint values, including the value interpolated to the LCL level
 
-#     profile_temperature : `pint.Quantity`
-#         The parcel profile temperatures at all of the levels in the returned pressures array,
-#         including the LCL
-#     """
-#     p_l, p_lcl, p_u, t_l, t_lcl, t_u = _parcel_profile_helper(pressure, temperature[0],
-#                                                               dewpoint[0])
-#     new_press = concatenate((p_l, p_lcl, p_u))
-#     prof_temp = concatenate((t_l, t_lcl, t_u))
-#     new_temp = _insert_lcl_level(pressure, temperature, p_lcl)
-#     new_dewp = _insert_lcl_level(pressure, dewpoint, p_lcl)
-#     return new_press, new_temp, new_dewp, prof_temp
-#### TODO modify /\ ####
+    profile_temperature : 1D array-like
+        The parcel profile temperatures at all of the levels in the returned pressures array,
+        including the LCL
+    """
+    p_l, p_lcl, p_u, t_l, t_lcl, t_u = _parcel_profile_helper(
+        pressure, temperature[0], dewpoint[0]
+    )
+    new_press = np.concatenate((p_l, p_lcl, p_u))
+    prof_temp = np.concatenate((t_l, t_lcl, t_u))
+    new_temp = _insert_lcl_level(pressure, temperature, p_lcl[0])
+    new_dewp = _insert_lcl_level(pressure, dewpoint, p_lcl[0])
+    return (new_press, new_temp, new_dewp, prof_temp)
 
 
 @numba.njit
@@ -530,7 +531,6 @@ def _parcel_profile_helper(pressure, temperature, dewpoint):
 
     # Find the LCL
     press_lcl, temp_lcl = _lcl_scalar(pressure[0], temperature, dewpoint)
-    press_lcl = press_lcl
 
     # Find the dry adiabatic profile, *including* the LCL. We need >= the LCL in case the
     # LCL is included in the levels. It's slightly redundant in that case, but simplifies
@@ -545,7 +545,7 @@ def _parcel_profile_helper(pressure, temperature, dewpoint):
             np.array([press_lcl]),
             np.empty((0,), dtype=pressure.dtype),
             temp_lower[:-1],
-            temp_lcl,
+            np.array([temp_lcl]),
             np.empty((0,), dtype=pressure.dtype)
         )
 
@@ -561,18 +561,66 @@ def _parcel_profile_helper(pressure, temperature, dewpoint):
         np.array([press_lcl]),
         press_upper[1:],
         temp_lower[:-1],
-        temp_lcl,
+        np.array([temp_lcl]),
         temp_upper[1:]
     )
 
 
-##### TODO modify \/ ####
-#def _insert_lcl_level(pressure, temperature, lcl_pressure):
-#    """Insert the LCL pressure into the profile."""
-#    interp_temp = interpolate_1d(lcl_pressure, pressure, temperature)
-#
-#    # Pressure needs to be increasing for searchsorted, so flip it and then convert
-#    # the index back to the original array
-#    loc = pressure.size - pressure[::-1].searchsorted(lcl_pressure)
-#    return units.Quantity(np.insert(temperature.m, loc, interp_temp.m), temperature.units)
-##### TODO modify /\ ####
+@numba.njit
+def _insert_lcl_level(pressure, temperature, lcl_pressure):
+    """Insert the LCL pressure into the profile."""
+    insert_idx = -1
+    for i, p in enumerate(pressure):
+        if lcl_pressure > p:
+            insert_idx = i
+            break
+
+    # interpolate / extrapolate
+    w = (
+        (np.log(lcl_pressure) - np.log(pressure[insert_idx]))
+        / (np.log(pressure[insert_idx - 1]) - np.log(pressure[insert_idx]))
+    )
+    interp_temp = w * temperature[insert_idx] + (1 - w) * temperature[insert_idx - 1]
+
+    if insert_idx > 0:
+        return np.concatenate((temperature[:insert_idx], np.array([interp_temp]), temperature[insert_idx:]))
+    else:
+        return np.concatenate((temperature, np.array([interp_temp])))
+
+
+@numba.njit
+def surface_based_cape_cin_1d(pressure, temperature, dewpoint):
+    r"""Calculate surface-based CAPE and CIN.
+
+    Calculate the convective available potential energy (CAPE) and convective inhibition (CIN)
+    of a given upper air profile for a surface-based parcel. CIN is integrated
+    between the surface and LFC, CAPE is integrated between the LFC and EL (or top of
+    sounding). Intersection points of the measured temperature profile and parcel profile are
+    logarithmically interpolated.
+
+    Parameters
+    ----------
+    pressure : array_like
+        Atmospheric pressure profile, in Pa. The first entry should be the starting
+        (surface) observation, with the array going from high to low pressure.
+
+    temperature : array_like
+        Temperature profile corresponding to the `pressure` profile, in K.
+
+    dewpoint : array_like
+        Dewpoint profile corresponding to the `pressure` profile, in K.
+
+    Returns
+    -------
+    array_like
+        Surface based Convective Available Potential Energy (CAPE) and Convective Inhibition
+        (CIN), in J/kg.
+
+    """
+    mask = ~_nan_mask(pressure, temperature, dewpoint)
+    pressure = pressure[mask]
+    temperature = temperature[mask]
+    dewpoint = dewpoint[mask]
+    
+    p, t, td, profile = parcel_profile_with_lcl(pressure, temperature, dewpoint)
+    return _cape_cin_single_profile(p, t, td, profile)
