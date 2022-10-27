@@ -268,11 +268,14 @@ def _steffensens_method(func, x0, constants, xtol=1e-08, maxiter=500):
     for i in range(1, maxiter + 1):
         p1 = func(p0, constants)
         p2 = func(p1, constants)
-        p = p0 - (p1 - p0)**2 / (p2 - 2 * p1 + p0)
+        delta_sqr = (p2 - 2 * p1 + p0)
+        if np.sqrt(np.abs(delta_sqr)) < xtol:
+            return p2  # early stop on delta-square == 0
+        p = p0 - (p1 - p0)**2 / delta_sqr
         if np.abs(p - p0) < xtol:
             return p  # convergence
         elif np.isnan(p) or np.isinf(p):
-            return p2  # early stop on delta-square == 0
+            return p0  # something went wrong, abort from prior loop
         else:
             p0 = p
     return p0
